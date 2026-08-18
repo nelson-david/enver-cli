@@ -36,10 +36,10 @@
     },
     "repository": {
         "type": "git",
-        "url": "git+https://github.com/nelson-david/enver-os.git"
+        "url": "git+https://github.com/nelson-david/enver-cli.git"
     },
     "bugs": {
-        "url": "https://github.com/nelson-david/enver-os/issues"
+        "url": "https://github.com/nelson-david/enver-cli/issues"
     },
     "homepage": "https://enver-os.xyz"
 }
