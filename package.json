@@ -33,5 +33,13 @@
         "tsup": "^8.5.1",
         "tsx": "^4.23.11",
         "typescript": "^7.0.2"
-    }
+    },
+    "repository": {
+        "type": "git",
+        "url": "git+https://github.com/nelson-david/enver-os.git"
+    },
+    "bugs": {
+        "url": "https://github.com/nelson-david/enver-os/issues"
+    },
+    "homepage": "https://enver-os.xyz"
 }
