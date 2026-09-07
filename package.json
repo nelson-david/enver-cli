@@ -1,6 +1,6 @@
 {
     "name": "enver-os",
-    "version": "1.0.2",
+    "version": "1.0.3",
     "description": "Security-first environment variable orchestrator",
     "main": "index.js",
     "bin": {

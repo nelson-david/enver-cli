@@ -1,26 +1,26 @@
-name: Update Homebrew Formula
+name: Build Binaries & Update Homebrew
 
 on:
-  # Trigger when a new release is published on GitHub
   release:
     types: [published]
-
-  # Allow manual trigger with an optional version override
   workflow_dispatch:
     inputs:
       version:
-        description: "npm package version to update to (e.g. 1.0.3). Leave empty to read from package.json."
+        description: "Release version (e.g. 1.0.3). Defaults to package.json version."
         required: false
 
+permissions:
+  contents: write
+
 jobs:
-  update-formula:
+  build-and-publish:
     runs-on: ubuntu-latest
 
     steps:
       - name: Checkout CLI repo
         uses: actions/checkout@v4
 
-      - name: Determine version
+      - name: Determine Version
         id: version
         run: |
           if [ -n "${{ github.event.inputs.version }}" ]; then
@@ -29,85 +29,137 @@ jobs:
             VERSION=$(jq -r '.version' package.json)
           fi
           echo "version=$VERSION" >> "$GITHUB_OUTPUT"
-          echo "📦 Updating Homebrew formula to v$VERSION"
+          echo "tag=v$VERSION" >> "$GITHUB_OUTPUT"
+          echo "📦 Building Enver CLI v$VERSION"
 
-      - name: Wait for npm registry availability
+      - name: Setup Bun
+        uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: latest
+
+      - name: Install dependencies
+        run: bun install
+
+      - name: Compile Standalone Binaries
+        run: |
+          mkdir -p dist-bin/darwin-arm64 dist-bin/darwin-x64 dist-bin/linux-x64 dist-bin/linux-arm64 dist-bin/windows-x64
+          mkdir -p release-assets
+
+          echo "Compiling for macOS Apple Silicon (arm64)..."
+          bun build --compile --minify --target=bun-darwin-arm64 ./src/index.ts --outfile ./dist-bin/darwin-arm64/ev
+
+          echo "Compiling for macOS Intel (x64)..."
+          bun build --compile --minify --target=bun-darwin-x64 ./src/index.ts --outfile ./dist-bin/darwin-x64/ev
+
+          echo "Compiling for Linux x64..."
+          bun build --compile --minify --target=bun-linux-x64 ./src/index.ts --outfile ./dist-bin/linux-x64/ev
+
+          echo "Compiling for Linux arm64..."
+          bun build --compile --minify --target=bun-linux-arm64 ./src/index.ts --outfile ./dist-bin/linux-arm64/ev
+
+          echo "Compiling for Windows x64..."
+          bun build --compile --minify --target=bun-windows-x64 ./src/index.ts --outfile ./dist-bin/windows-x64/ev.exe
+
+      - name: Package Archives & Compute Checksums
+        id: hashes
         run: |
           VERSION="${{ steps.version.outputs.version }}"
-          TARBALL_URL="https://registry.npmjs.org/enver-os/-/enver-os-${VERSION}.tgz"
-          echo "Waiting for $TARBALL_URL to become available..."
 
-          for i in $(seq 1 30); do
-            STATUS=$(curl -s -o /dev/null -w "%{http_code}" "$TARBALL_URL")
-            if [ "$STATUS" = "200" ]; then
-              echo "✅ Tarball is available"
-              exit 0
-            fi
-            echo "Attempt $i/30 — got HTTP $STATUS, retrying in 10s..."
-            sleep 10
-          done
+          tar -czvf "release-assets/ev-darwin-arm64.tar.gz" -C ./dist-bin/darwin-arm64 ev
+          tar -czvf "release-assets/ev-darwin-x64.tar.gz" -C ./dist-bin/darwin-x64 ev
+          tar -czvf "release-assets/ev-linux-x64.tar.gz" -C ./dist-bin/linux-x64 ev
+          tar -czvf "release-assets/ev-linux-arm64.tar.gz" -C ./dist-bin/linux-arm64 ev
+          zip -j "release-assets/ev-windows-x64.zip" ./dist-bin/windows-x64/ev.exe
 
-          echo "❌ Tarball not available after 5 minutes"
-          exit 1
+          cd release-assets
+          sha256sum * > checksums.txt
 
-      - name: Compute SHA256
-        id: sha
-        run: |
-          VERSION="${{ steps.version.outputs.version }}"
-          TARBALL_URL="https://registry.npmjs.org/enver-os/-/enver-os-${VERSION}.tgz"
-          SHA256=$(curl -sL "$TARBALL_URL" | shasum -a 256 | awk '{print $1}')
-          echo "sha256=$SHA256" >> "$GITHUB_OUTPUT"
-          echo "🔐 SHA256: $SHA256"
+          SHA_DARWIN_ARM64=$(shasum -a 256 ev-darwin-arm64.tar.gz | awk '{print $1}')
+          SHA_DARWIN_X64=$(shasum -a 256 ev-darwin-x64.tar.gz | awk '{print $1}')
+          SHA_LINUX_X64=$(shasum -a 256 ev-linux-x64.tar.gz | awk '{print $1}')
+          SHA_LINUX_ARM64=$(shasum -a 256 ev-linux-arm64.tar.gz | awk '{print $1}')
 
-      - name: Checkout Homebrew tap repo
+          echo "sha_darwin_arm64=$SHA_DARWIN_ARM64" >> "$GITHUB_OUTPUT"
+          echo "sha_darwin_x64=$SHA_DARWIN_X64" >> "$GITHUB_OUTPUT"
+          echo "sha_linux_x64=$SHA_LINUX_X64" >> "$GITHUB_OUTPUT"
+          echo "sha_linux_arm64=$SHA_LINUX_ARM64" >> "$GITHUB_OUTPUT"
+          cd ..
+
+      - name: Upload Binaries to GitHub Release
+        uses: softprops/action-gh-release@v2
+        if: startsWith(github.ref, 'refs/tags/') || github.event_name == 'release'
+        with:
+          files: release-assets/*
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Checkout Homebrew Tap Repo
         uses: actions/checkout@v4
         with:
           repository: nelson-david/homebrew-enver
           token: ${{ secrets.HOMEBREW_TAP_TOKEN }}
           path: homebrew-enver
 
-      - name: Update formula
+      - name: Generate Standalone Homebrew Formula
         run: |
           VERSION="${{ steps.version.outputs.version }}"
-          SHA256="${{ steps.sha.outputs.sha256 }}"
+          SHA_DARWIN_ARM64="${{ steps.hashes.outputs.sha_darwin_arm64 }}"
+          SHA_DARWIN_X64="${{ steps.hashes.outputs.sha_darwin_x64 }}"
+          SHA_LINUX_ARM64="${{ steps.hashes.outputs.sha_linux_arm64 }}"
+          SHA_LINUX_X64="${{ steps.hashes.outputs.sha_linux_x64 }}"
           FORMULA="homebrew-enver/Formula/enver.rb"
 
-          cat > "$FORMULA" << 'EOF'
+          cat > "$FORMULA" << EOF
           class Enver < Formula
-              desc "Security-first environment variable orchestrator"
-              homepage "https://enver-os.xyz"
-              url "https://registry.npmjs.org/enver-os/-/enver-os-VERSION_PLACEHOLDER.tgz"
-              sha256 "SHA256_PLACEHOLDER"
-              license "MIT"
+            desc "Security-first environment variable orchestrator"
+            homepage "https://enver-os.xyz"
+            version "${VERSION}"
+            license "MIT"
 
-              depends_on "node"
-
-              def install
-                  system "npm", "install", *std_npm_args
-                  bin.install_symlink Dir["#{libexec}/bin/*"]
+            on_macos do
+              on_arm do
+                url "https://github.com/nelson-david/enver-cli/releases/download/v#{version}/ev-darwin-arm64.tar.gz"
+                sha256 "${SHA_DARWIN_ARM64}"
               end
-
-              test do
-                  system "node", "#{bin}/ev", "--version"
+              on_intel do
+                url "https://github.com/nelson-david/enver-cli/releases/download/v#{version}/ev-darwin-x64.tar.gz"
+                sha256 "${SHA_DARWIN_X64}"
               end
+            end
+
+            on_linux do
+              on_arm do
+                url "https://github.com/nelson-david/enver-cli/releases/download/v#{version}/ev-linux-arm64.tar.gz"
+                sha256 "${SHA_LINUX_ARM64}"
+              end
+              on_intel do
+                url "https://github.com/nelson-david/enver-cli/releases/download/v#{version}/ev-linux-x64.tar.gz"
+                sha256 "${SHA_LINUX_X64}"
+              end
+            end
+
+            def install
+              bin.install "ev"
+            end
+
+            test do
+              system "#{bin}/ev", "--version"
+            end
           end
           EOF
 
-          # Replace placeholders and fix indentation
-          sed -i "s/VERSION_PLACEHOLDER/${VERSION}/g" "$FORMULA"
-          sed -i "s/SHA256_PLACEHOLDER/${SHA256}/g" "$FORMULA"
-          # Remove leading whitespace from heredoc
+          # Fix indentation
           sed -i 's/^          //' "$FORMULA"
 
-          echo "✅ Updated formula:"
+          echo "✅ Generated formula:"
           cat "$FORMULA"
 
-      - name: Commit and push
+      - name: Commit and Push to Tap
         working-directory: homebrew-enver
         run: |
           VERSION="${{ steps.version.outputs.version }}"
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
           git add Formula/enver.rb
-          git commit -m "Update enver to v${VERSION}"
+          git commit -m "Update enver to v${VERSION} (standalone binary)" || exit 0
           git push

@@ -1,7 +1,6 @@
 #!/usr/bin/env node --no-warnings
 
 import { Command } from "commander";
-import { createRequire } from "node:module";
 import { pullCommand } from "./commands/pull.js";
 import { pushCommand } from "./commands/push.js";
 import { loginCommand } from "./commands/login.js";
@@ -10,14 +9,13 @@ import { membersCommand } from "./commands/members.js";
 import { initCommand } from "./commands/init.js";
 import { getLocalProjectConfig, API_URL } from "./utils/config.js";
 
-const require = createRequire(import.meta.url);
-const { version } = require("../package.json");
+import pkg from "../package.json" with { type: "json" };
 
 const program = new Command();
 program
     .name("ev")
     .description("Security-first environment variable orchestrator")
-    .version(version);
+    .version(pkg.version);
 
 program
     .command("login")
