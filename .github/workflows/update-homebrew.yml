@@ -37,8 +37,11 @@ jobs:
         with:
           bun-version: latest
 
-      - name: Install dependencies
-        run: bun install
+      - name: Install dependencies & UPX
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y upx
+          bun install
 
       - name: Compile Standalone Binaries
         run: |
@@ -60,16 +63,24 @@ jobs:
           echo "Compiling for Windows x64..."
           bun build --compile --minify --target=bun-windows-x64 ./src/index.ts --outfile ./dist-bin/windows-x64/ev.exe
 
+      - name: Compress Linux & Windows Executables with UPX
+        run: |
+          echo "Compressing Linux and Windows binaries with UPX..."
+          upx --best ./dist-bin/linux-x64/ev || true
+          upx --best ./dist-bin/linux-arm64/ev || true
+          upx --best ./dist-bin/windows-x64/ev.exe || true
+
       - name: Package Archives & Compute Checksums
         id: hashes
         run: |
           VERSION="${{ steps.version.outputs.version }}"
 
-          tar -czvf "release-assets/ev-darwin-arm64.tar.gz" -C ./dist-bin/darwin-arm64 ev
-          tar -czvf "release-assets/ev-darwin-x64.tar.gz" -C ./dist-bin/darwin-x64 ev
-          tar -czvf "release-assets/ev-linux-x64.tar.gz" -C ./dist-bin/linux-x64 ev
-          tar -czvf "release-assets/ev-linux-arm64.tar.gz" -C ./dist-bin/linux-arm64 ev
-          zip -j "release-assets/ev-windows-x64.zip" ./dist-bin/windows-x64/ev.exe
+          # High compression gzip for macOS and Linux archives
+          GZIP=-9 tar -czvf "release-assets/ev-darwin-arm64.tar.gz" -C ./dist-bin/darwin-arm64 ev
+          GZIP=-9 tar -czvf "release-assets/ev-darwin-x64.tar.gz" -C ./dist-bin/darwin-x64 ev
+          GZIP=-9 tar -czvf "release-assets/ev-linux-x64.tar.gz" -C ./dist-bin/linux-x64 ev
+          GZIP=-9 tar -czvf "release-assets/ev-linux-arm64.tar.gz" -C ./dist-bin/linux-arm64 ev
+          zip -9 -j "release-assets/ev-windows-x64.zip" ./dist-bin/windows-x64/ev.exe
 
           cd release-assets
           sha256sum * > checksums.txt
