@@ -1,29 +1,9 @@
-import fs from "node:fs/promises";
-import path from "node:path";
 import { Command } from "commander";
 import ora from "ora";
 import chalk from "chalk";
 import { input, select } from "@inquirer/prompts";
 import { getStoredToken } from "../auth.js";
-
-const API_URL = process.env.ENVER_API_URL || "http://localhost:3250/api/v1";
-
-interface LocalProjectConfig {
-    projectId: string;
-    name: string;
-    defaultEnvironment?: string;
-}
-
-// Helper to read local .ev.json
-async function getLocalProjectConfig(): Promise<LocalProjectConfig | null> {
-    try {
-        const configPath = path.join(process.cwd(), ".ev.json");
-        const data = await fs.readFile(configPath, "utf8");
-        return JSON.parse(data) as LocalProjectConfig;
-    } catch {
-        return null;
-    }
-}
+import { API_URL, getLocalProjectConfig } from "../utils/config.js";
 
 export const membersCommand = new Command("members").description(
     "Manage team members in your Enver projects",

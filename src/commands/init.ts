@@ -2,31 +2,19 @@ import fs from "node:fs/promises";
 import path from "node:path";
 import ora from "ora";
 import chalk from "chalk";
-import axios from "axios";
 import { input, select, password } from "@inquirer/prompts";
-import { getConfig } from "../auth.js";
+import { getStoredToken } from "../auth.js";
+import { API_URL } from "../utils/config.js";
 
-const API_BASE_URL =
-    process.env.ENVER_API_URL || "http://localhost:3250/api/v1";
 const LOCAL_CONFIG_FILE = ".ev.json";
 
-function getApiClient() {
-    const config = getConfig();
-    const token = config?.token || config?.apiKey;
-
+export async function initCommand() {
+    const token = await getStoredToken();
     if (!token) {
         console.error(chalk.red("❌ Not logged in. Run `ev login` first."));
         process.exit(1);
     }
 
-    return axios.create({
-        baseURL: API_BASE_URL,
-        headers: { Authorization: `Bearer ${token}` },
-    });
-}
-
-export async function initCommand() {
-    const client = getApiClient();
     const configPath = path.join(process.cwd(), LOCAL_CONFIG_FILE);
 
     // 1. Check if project is already initialized in current directory
@@ -78,10 +66,22 @@ export async function initCommand() {
         const spinner = ora("Creating project workspace on Enver...").start();
 
         // 2. Register/Fetch project on Hono backend
-        const { data } = await client.post("/projects", {
-            name: projectName,
-            environment,
+        const res = await fetch(`${API_URL}/projects`, {
+            method: "POST",
+            headers: {
+                "Content-Type": "application/json",
+                Authorization: `Bearer ${token}`,
+            },
+            body: JSON.stringify({
+                name: projectName,
+                environment,
+            }),
         });
+
+        const data = await res.json();
+        if (!res.ok) {
+            throw new Error(data.error || res.statusText);
+        }
         const project = data.data;
 
         // 3. Save configuration locally (.ev.json)
@@ -120,7 +120,7 @@ export async function initCommand() {
 
         console.error(
             chalk.red(
-                `\n❌ Failed to initialize project: ${err.response?.data?.error || err.message}\n`,
+                `\n❌ Failed to initialize project: ${err.message}\n`,
             ),
         );
     }

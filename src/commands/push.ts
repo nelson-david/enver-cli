@@ -2,28 +2,9 @@ import fs from "node:fs/promises";
 import path from "node:path";
 import ora from "ora";
 import chalk from "chalk";
-import axios from "axios";
 import { encryptPayload } from "../utils/crypto.js";
-import { getStoredToken } from "./login.js";
-
-const API_URL = process.env.ENVER_API_URL || "http://localhost:3250/api/v1";
-
-interface LocalProjectConfig {
-    projectId: string;
-    name: string;
-    defaultEnvironment?: string;
-}
-
-// Helper to read local .ev.json
-async function getLocalProjectConfig(): Promise<LocalProjectConfig | null> {
-    try {
-        const configPath = path.join(process.cwd(), ".ev.json");
-        const data = await fs.readFile(configPath, "utf8");
-        return JSON.parse(data) as LocalProjectConfig;
-    } catch {
-        return null;
-    }
-}
+import { getStoredToken } from "../auth.js";
+import { API_URL, getLocalProjectConfig } from "../utils/config.js";
 
 export async function pushCommand(
     projectIdArg?: string,
@@ -105,9 +86,13 @@ export async function pushCommand(
         spinner.text = `Uploading encrypted payload for [${projectId}] (${targetEnvironment})...`;
 
         // 6. Post encrypted data to backend
-        const response = await axios.post(
-            `${API_URL}/envs`,
-            {
+        const res = await fetch(`${API_URL}/envs`, {
+            method: "POST",
+            headers: {
+                "Content-Type": "application/json",
+                Authorization: `Bearer ${token}`,
+            },
+            body: JSON.stringify({
                 projectId,
                 environment: targetEnvironment,
                 ciphertext,
@@ -117,15 +102,12 @@ export async function pushCommand(
                     shareIndex: index + 1,
                     shareData,
                 })),
-            },
-            {
-                headers: {
-                    Authorization: `Bearer ${token}`,
-                },
-            },
-        );
+            }),
+        });
 
-        if (response.data.success) {
+        const data = await res.json();
+
+        if (res.ok && data.success) {
             spinner.succeed(
                 chalk.green(
                     `Successfully encrypted & pushed .env to remote (${targetEnvironment})`,
@@ -133,13 +115,13 @@ export async function pushCommand(
             );
         } else {
             throw new Error(
-                response.data.error || "Failed to push environment variables.",
+                data.error || "Failed to push environment variables.",
             );
         }
     } catch (error: any) {
         spinner.fail(
             chalk.red(
-                `Failed to push secrets: ${error.response?.data?.error || error.message}`,
+                `Failed to push secrets: ${error.message}`,
             ),
         );
     }

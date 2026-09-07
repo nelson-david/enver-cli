@@ -2,29 +2,9 @@ import fs from "node:fs/promises";
 import path from "node:path";
 import ora from "ora";
 import chalk from "chalk";
-import dotenv from "dotenv";
-import axios from "axios";
 import { decryptPayload } from "../utils/crypto.js";
-import { getStoredToken } from "./login.js";
-
-const API_URL = process.env.ENVER_API_URL || "http://localhost:3250/api/v1";
-
-interface LocalProjectConfig {
-    projectId: string;
-    name: string;
-    defaultEnvironment?: string;
-}
-
-// Helper to read local .ev.json
-async function getLocalProjectConfig(): Promise<LocalProjectConfig | null> {
-    try {
-        const configPath = path.join(process.cwd(), ".ev.json");
-        const data = await fs.readFile(configPath, "utf8");
-        return JSON.parse(data) as LocalProjectConfig;
-    } catch {
-        return null;
-    }
-}
+import { getStoredToken } from "../auth.js";
+import { API_URL, getLocalProjectConfig, parseEnv } from "../utils/config.js";
 
 export async function pullCommand(
     projectIdArg?: string,
@@ -76,14 +56,21 @@ export async function pullCommand(
 
     try {
         // 4. Fetch secret payload from backend with Auth header
-        const response = await axios.get(`${API_URL}/envs/share/${projectId}`, {
-            params: { environment: targetEnvironment },
+        const url = new URL(`${API_URL}/envs/share/${projectId}`);
+        url.searchParams.set("environment", targetEnvironment);
+
+        const res = await fetch(url.toString(), {
             headers: {
                 Authorization: `Bearer ${token}`,
             },
         });
 
-        const { ciphertext, iv, salt, shares } = response.data.data;
+        const data = await res.json();
+        if (!res.ok) {
+            throw new Error(data.error || res.statusText);
+        }
+
+        const { ciphertext, iv, salt, shares } = data.data;
         spinner.text = "Decrypting secrets locally...";
 
         // 5. Decrypt secret payload locally
@@ -100,16 +87,16 @@ export async function pullCommand(
 
         // 6. Write / Merge into local .env file
         const envPath = path.join(process.cwd(), ".env");
-        let existingEnvs = {};
+        let existingEnvs: Record<string, string> = {};
 
         try {
             const existingFile = await fs.readFile(envPath, "utf8");
-            existingEnvs = dotenv.parse(existingFile);
+            existingEnvs = parseEnv(existingFile);
         } catch {
             // File does not exist yet
         }
 
-        const newEnvs = dotenv.parse(plainTextEnv);
+        const newEnvs = parseEnv(plainTextEnv);
         const mergedEnvs = { ...existingEnvs, ...newEnvs };
 
         const formattedEnvFile = Object.entries(mergedEnvs)
@@ -126,7 +113,7 @@ export async function pullCommand(
     } catch (error: any) {
         spinner.fail(
             chalk.red(
-                `Failed to pull secrets: ${error.response?.data?.error || error.message}`,
+                `Failed to pull secrets: ${error.message}`,
             ),
         );
     }

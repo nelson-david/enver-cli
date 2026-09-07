@@ -1,7 +1,7 @@
 {
     "name": "enver-os",
     "version": "1.0.2",
-    "description": "",
+    "description": "Security-first environment variable orchestrator",
     "main": "index.js",
     "bin": {
         "ev": "./dist/index.mjs"
@@ -18,17 +18,12 @@
     "license": "ISC",
     "dependencies": {
         "@inquirer/prompts": "^5.5.0",
-        "axios": "^1.19.0",
         "chalk": "^6.0.0",
         "commander": "^15.0.0",
-        "dotenv": "^17.4.2",
-        "fs-extra": "^11.4.0",
-        "open": "^11.0.0",
         "ora": "^9.4.1",
         "secrets.js-grempe": "^2.0.0"
     },
     "devDependencies": {
-        "@types/fs-extra": "^11.0.4",
         "@types/node": "^26.1.2",
         "tsup": "^8.5.1",
         "tsx": "^4.23.11",

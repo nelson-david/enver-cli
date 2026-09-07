@@ -1,0 +1,113 @@
+name: Update Homebrew Formula
+
+on:
+  # Trigger when a new release is published on GitHub
+  release:
+    types: [published]
+
+  # Allow manual trigger with an optional version override
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "npm package version to update to (e.g. 1.0.3). Leave empty to read from package.json."
+        required: false
+
+jobs:
+  update-formula:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout CLI repo
+        uses: actions/checkout@v4
+
+      - name: Determine version
+        id: version
+        run: |
+          if [ -n "${{ github.event.inputs.version }}" ]; then
+            VERSION="${{ github.event.inputs.version }}"
+          else
+            VERSION=$(jq -r '.version' package.json)
+          fi
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+          echo "📦 Updating Homebrew formula to v$VERSION"
+
+      - name: Wait for npm registry availability
+        run: |
+          VERSION="${{ steps.version.outputs.version }}"
+          TARBALL_URL="https://registry.npmjs.org/enver-os/-/enver-os-${VERSION}.tgz"
+          echo "Waiting for $TARBALL_URL to become available..."
+
+          for i in $(seq 1 30); do
+            STATUS=$(curl -s -o /dev/null -w "%{http_code}" "$TARBALL_URL")
+            if [ "$STATUS" = "200" ]; then
+              echo "✅ Tarball is available"
+              exit 0
+            fi
+            echo "Attempt $i/30 — got HTTP $STATUS, retrying in 10s..."
+            sleep 10
+          done
+
+          echo "❌ Tarball not available after 5 minutes"
+          exit 1
+
+      - name: Compute SHA256
+        id: sha
+        run: |
+          VERSION="${{ steps.version.outputs.version }}"
+          TARBALL_URL="https://registry.npmjs.org/enver-os/-/enver-os-${VERSION}.tgz"
+          SHA256=$(curl -sL "$TARBALL_URL" | shasum -a 256 | awk '{print $1}')
+          echo "sha256=$SHA256" >> "$GITHUB_OUTPUT"
+          echo "🔐 SHA256: $SHA256"
+
+      - name: Checkout Homebrew tap repo
+        uses: actions/checkout@v4
+        with:
+          repository: nelson-david/homebrew-enver
+          token: ${{ secrets.HOMEBREW_TAP_TOKEN }}
+          path: homebrew-enver
+
+      - name: Update formula
+        run: |
+          VERSION="${{ steps.version.outputs.version }}"
+          SHA256="${{ steps.sha.outputs.sha256 }}"
+          FORMULA="homebrew-enver/Formula/enver.rb"
+
+          cat > "$FORMULA" << 'EOF'
+          class Enver < Formula
+              desc "Security-first environment variable orchestrator"
+              homepage "https://enver-os.xyz"
+              url "https://registry.npmjs.org/enver-os/-/enver-os-VERSION_PLACEHOLDER.tgz"
+              sha256 "SHA256_PLACEHOLDER"
+              license "MIT"
+
+              depends_on "node"
+
+              def install
+                  system "npm", "install", *std_npm_args
+                  bin.install_symlink Dir["#{libexec}/bin/*"]
+              end
+
+              test do
+                  system "node", "#{bin}/ev", "--version"
+              end
+          end
+          EOF
+
+          # Replace placeholders and fix indentation
+          sed -i "s/VERSION_PLACEHOLDER/${VERSION}/g" "$FORMULA"
+          sed -i "s/SHA256_PLACEHOLDER/${SHA256}/g" "$FORMULA"
+          # Remove leading whitespace from heredoc
+          sed -i 's/^          //' "$FORMULA"
+
+          echo "✅ Updated formula:"
+          cat "$FORMULA"
+
+      - name: Commit and push
+        working-directory: homebrew-enver
+        run: |
+          VERSION="${{ steps.version.outputs.version }}"
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add Formula/enver.rb
+          git commit -m "Update enver to v${VERSION}"
+          git push

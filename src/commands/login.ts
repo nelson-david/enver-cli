@@ -1,20 +1,25 @@
-import fs from "node:fs/promises";
-import path from "node:path";
-import os from "node:os";
+import { exec } from "node:child_process";
 import readline from "node:readline/promises";
 import ora from "ora";
 import chalk from "chalk";
-import open from "open";
+import { saveConfig } from "../auth.js";
 
-const CONFIG_PATH = path.join(os.homedir(), ".enver", "config.json");
 const DASHBOARD_TOKEN_URL = process.env.ENVER_WEB_URL
     ? `${process.env.ENVER_WEB_URL}/settings/tokens`
-    : "http://localhost:3000/settings/tokens";
+    : "https://app.enver-os.xyz/settings/tokens";
+
+function openUrl(url: string) {
+    const cmd =
+        process.platform === "darwin"
+            ? "open"
+            : process.platform === "win32"
+              ? "start"
+              : "xdg-open";
+    exec(`${cmd} "${url}"`);
+}
 
 export async function loginCommand(tokenArg?: string) {
     let token = tokenArg?.trim();
-
-    console.log("TOKEN: ", token);
 
     // If no token argument passed, prompt interactively
     if (!token) {
@@ -25,9 +30,9 @@ export async function loginCommand(tokenArg?: string) {
         );
 
         try {
-            await open(DASHBOARD_TOKEN_URL);
+            openUrl(DASHBOARD_TOKEN_URL);
         } catch {
-            // Ignore if browser fail to launch automatically
+            // Ignore if browser fails to launch automatically
         }
 
         const rl = readline.createInterface({
@@ -51,14 +56,7 @@ export async function loginCommand(tokenArg?: string) {
     const spinner = ora("Saving session token...").start();
 
     try {
-        const configDir = path.dirname(CONFIG_PATH);
-        await fs.mkdir(configDir, { recursive: true });
-
-        await fs.writeFile(
-            CONFIG_PATH,
-            JSON.stringify({ token }, null, 2),
-            "utf8",
-        );
+        saveConfig({ token });
 
         spinner.succeed(
             chalk.green("Successfully logged in! Session token saved."),
@@ -67,15 +65,5 @@ export async function loginCommand(tokenArg?: string) {
         spinner.fail(
             chalk.red(`Failed to save session token: ${error.message}`),
         );
-    }
-}
-
-export async function getStoredToken(): Promise<string | null> {
-    try {
-        const data = await fs.readFile(CONFIG_PATH, "utf8");
-        const config = JSON.parse(data);
-        return config.token || null;
-    } catch {
-        return null;
     }
 }

@@ -1,36 +1,23 @@
 #!/usr/bin/env node --no-warnings
 
 import { Command } from "commander";
+import { createRequire } from "node:module";
 import { pullCommand } from "./commands/pull.js";
 import { pushCommand } from "./commands/push.js";
 import { loginCommand } from "./commands/login.js";
 import { getConfig } from "./auth.js";
-import axios from "axios";
 import { membersCommand } from "./commands/members.js";
 import { initCommand } from "./commands/init.js";
-import { getLocalProjectConfig } from "./utils/config.js";
+import { getLocalProjectConfig, API_URL } from "./utils/config.js";
 
-const API_BASE_URL = process.env.ENVER_API_URL || "http://localhost:3250/api";
+const require = createRequire(import.meta.url);
+const { version } = require("../package.json");
+
 const program = new Command();
 program
     .name("ev")
     .description("Security-first environment variable orchestrator")
-    .version("1.0.0");
-
-function getApiClient() {
-    const config = getConfig();
-    const token = config?.token || config?.apiKey;
-
-    if (!token) {
-        console.error("❌ Not logged in. Run `ev login` first.");
-        process.exit(1);
-    }
-
-    return axios.create({
-        baseURL: API_BASE_URL,
-        headers: { Authorization: `Bearer ${token}` },
-    });
-}
+    .version(version);
 
 program
     .command("login")
@@ -45,8 +32,19 @@ program
     .description("Display currently authenticated Enver user details")
     .action(async () => {
         try {
-            const client = getApiClient();
-            const { data } = await client.get("/auth/me");
+            const config = getConfig();
+            const token = config?.token || config?.apiKey;
+
+            if (!token) {
+                console.error("❌ Not logged in. Run `ev login` first.");
+                process.exit(1);
+            }
+
+            const res = await fetch(`${API_URL}/auth/me`, {
+                headers: { Authorization: `Bearer ${token}` },
+            });
+            const data = await res.json();
+            if (!res.ok) throw new Error(data.error || res.statusText);
             const user = data.data;
 
             console.log("\n👤 Enver Authenticated User Profile");
@@ -62,7 +60,7 @@ program
         } catch (err: any) {
             console.error(
                 "❌ Failed to fetch user details:",
-                err.response?.data?.error || err.message,
+                err.message,
             );
         }
     });
